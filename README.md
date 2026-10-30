@@ -1,40 +1,75 @@
 # Object Detection + Distance Estimation for Robotics Navigation
 
-Detect cones, barriers, and stop signs, estimate their distance from one
-camera, and test edge-device optimizations.
+## Project Overview
 
-## What is implemented
+This project detects navigation-relevant objects, estimates their distance
+from a single camera, and evaluates optimizations for edge devices.
 
-### Detection
+Target objects:
 
-- YOLOv8n transfer learning
-- BDD100K real driving images
-- Real complementary data:
-  - TraCon: cones
-  - DORIE/barrier data: barriers
-  - GTSDB data: stop signs
-- Unified classes:
+- Traffic cones
+- Road barriers
+- Stop signs
 
-```text
-0 traffic_cone
-1 barrier
-2 stop_sign
-```
+The required workflow is implemented with real image data, YOLOv8 transfer
+learning, pinhole-camera distance estimation, quantization, pruning, and
+CPU/GPU benchmarking.
+
+## Contact (Name, Phone, Email)
+
+- **Name:** Ratnajeet Patil
+- **Phone:** 9422221740
+- **Email:** ratnajeetpatil62@gmail.com
+
+## Features
+
+- YOLOv8n object detection
+- Three unified classes: `traffic_cone`, `barrier`, `stop_sign`
+- Transfer learning from pretrained YOLOv8n weights
+- Distance annotation on each detection
+- Real camera calibration utility
+- ONNX FP32, FP16, and INT8 export
+- L1 pruning
+- CPU/GPU FPS and model-size benchmarking
+- Accuracy comparison between model variants
+- Optional real-input bird's-eye view
+- Optional epipolar-geometry utilities
+- Optional optical-flow tracking utilities
+
+## Dataset
+
+BDD100K is used as the primary real driving dataset. Real complementary
+datasets are used for classes that are not consistently available in the
+BDD100K labels:
+
+- TraCon: traffic cones
+- DORIE/barrier data: barriers
+- GTSDB: stop signs
 
 Verified local data:
 
+- 2,000 BDD images
+- 200 training images
+- 50 validation images
+
+The unified YOLO class mapping is:
+
 ```text
-BDD images:       2,000
-Training images:    200
-Validation images:  50
+0  traffic_cone
+1  barrier
+2  stop_sign
 ```
 
-Build and train:
+The current validation split contains 173 cone instances and no barrier or
+stop-sign instances. Its metrics therefore do not represent three-class
+accuracy.
 
-```powershell
-python scripts\build_real_dataset.py
-python scripts\train.py --data data\dataset\data.yaml `
-  --base yolov8n.pt --epochs 50
+## Model & Training
+
+The project uses YOLOv8n transfer learning:
+
+```text
+pretrained YOLOv8n -> fine-tuning on the merged real dataset
 ```
 
 The trained checkpoint is:
@@ -43,30 +78,42 @@ The trained checkpoint is:
 runs/detect/runs/train/bdd_finetune/weights/best.pt
 ```
 
-The current validation split has 173 cone instances and no barrier or
-stop-sign instances. Therefore the following values are cone-only validation
-results, not three-class results:
+The recorded validation metrics are:
 
 | Precision | Recall | mAP50 | mAP50-95 |
 |---:|---:|---:|---:|
 | 0.9772 | 0.8960 | 0.9476 | 0.8301 |
 
-Reports:
+These are cone-only validation results because of the current validation
+split composition.
 
-- `results/detection_metrics.json`
-- `results/detection_metrics.md`
+## Installation & Usage
 
-### Distance estimation
+Install the Python dependencies, prepare the real dataset, train the model,
+and run inference on a real image, video, folder, or camera.
 
-Distance uses the pinhole-camera equation:
+Detection output includes the class, confidence, and estimated distance, for
+example:
+
+```text
+Cone, 2.3m
+Stop Sign, 3.2m
+```
+
+## Distance Estimation
+
+Distance is estimated from the pinhole-camera relationship:
 
 ```text
 Z = fy * H / h
 ```
 
-- `fy`: vertical focal length in pixels
-- `H`: known object height
-- `h`: detected bounding-box height in pixels
+Where:
+
+- `Z` is the estimated distance in meters
+- `fy` is the vertical focal length in pixels
+- `H` is the known object height
+- `h` is the detected bounding-box height in pixels
 
 Configured reference heights:
 
@@ -76,61 +123,16 @@ Configured reference heights:
 | barrier | 0.80 m |
 | stop_sign | 0.60 m |
 
-The camera values are in `configs/config.yaml`. They are documented
-placeholders until a real camera is calibrated:
+Camera intrinsics are stored in `configs/config.yaml`. The default intrinsics
+are documented placeholders and should be replaced with calibration results
+for deployment.
 
-```powershell
-python scripts\calibrate.py --images data\calib_imgs `
-  --pattern 12,9 --square 0.03
-```
+## Results & Benchmarks
 
-Run detection and annotation on a real image:
+Benchmark hardware:
 
-```powershell
-python scripts\run_inference.py `
-  --source "data\dataset\val\images\TraCon_dataset_cone (10).jpg" `
-  --weights runs\detect\runs\train\bdd_finetune\weights\best.pt `
-  --output results\annotated.jpg --no-show
-```
-
-Boxes include class, confidence, and distance, for example:
-
-```text
-Cone, 2.3m
-Stop Sign, 3.2m
-```
-
-Real distance-error evaluation requires measured tape, laser, or known-position
-data in `results/ground_truth.csv`. That file currently contains only its
-header, so no real distance-error result is claimed.
-
-### Optimization
-
-Quantization:
-
-```powershell
-python scripts\quantize.py `
-  --weights runs\detect\runs\train\bdd_finetune\weights\best.pt `
-  --calib-dir data\dataset\train\images --all
-```
-
-Pruning:
-
-```powershell
-python scripts\prune.py `
-  --weights runs\detect\runs\train\bdd_finetune\weights\best.pt `
-  --amount 0.3
-```
-
-Benchmark:
-
-```powershell
-python scripts\quantize.py `
-  --weights runs\detect\runs\train\bdd_finetune\weights\best.pt `
-  --calib-dir data\dataset\train\images --benchmark
-```
-
-Recorded benchmark hardware: Intel i7-14700F CPU and NVIDIA RTX 5070 GPU.
+- CPU: Intel Core i7-14700F
+- GPU: NVIDIA GeForce RTX 5070
 
 | Model | CPU FPS | GPU FPS | Size |
 |---|---:|---:|---:|
@@ -139,56 +141,103 @@ Recorded benchmark hardware: Intel i7-14700F CPU and NVIDIA RTX 5070 GPU.
 | INT8 ONNX | 26.8 | 123.8 | 4.9 MB |
 | FP16 ONNX | 22.2 | 196.5 | 6.2 MB |
 
-Pruning measured 29.9% sparsity with a 30% target. Full details are in
-`results/benchmark.md` and `results/pruning.md`.
+Pruning measured 29.9% sparsity with a 30% target.
 
-Compare accuracy on the same validation split:
+Detailed reports:
+
+- `results/benchmark.md`
+- `results/pruning.md`
+- `results/detection_metrics.md`
+- `results/detection_metrics.json`
+
+The included real-data example is:
+
+`results/output_samples/real_dataset_detection_bev.jpg`
+
+## Project Structure
+
+```text
+configs/              camera, class, and runtime configuration
+scripts/              dataset, training, inference, evaluation, optimization
+src/detection/        detector, dataset conversion, and training
+src/distance/         pinhole distance estimation
+src/geometry/         optional BEV, epipolar, and optical-flow utilities
+src/optimization/     quantization, pruning, and benchmarking
+tests/                unit and pipeline tests
+results/              reports and real-data output
+```
+
+## Limitations & References
+
+- The current validation split does not evaluate barrier or stop-sign
+  instances.
+- `results/ground_truth.csv` contains only its header, so no measured
+  distance-error result is claimed.
+- Camera intrinsics are placeholders until a real camera is calibrated.
+- No stereo pair is currently included, so no epipolar result is claimed.
+- No consecutive video is currently included, so no optical-flow result is
+  claimed.
+- Optional features must be run with real stereo images or real video frames.
+- BDD100K: https://github.com/bdd100k/bdd100k
+- TraCon: https://github.com/ikatsamenis/Cone-Detection
+- DORIE: https://zenodo.org/records/17277466
+- GTSDB: https://huggingface.co/datasets/GlowBond/GTSDB
+
+## Commands
 
 ```powershell
+# Install dependencies
+pip install -r requirements.txt
+
+# Build the merged real dataset
+python scripts\build_real_dataset.py
+
+# Train and validate
+python scripts\train.py --data data\dataset\data.yaml `
+  --base yolov8n.pt --epochs 50
+
+# Validate an existing checkpoint
+python scripts\train.py --validate-only --name bdd_finetune
+
+# Run inference on a real image
+python scripts\run_inference.py `
+  --source "data\dataset\val\images\TraCon_dataset_cone (10).jpg" `
+  --weights runs\detect\runs\train\bdd_finetune\weights\best.pt `
+  --output results\annotated.jpg --no-show
+
+# Calibrate camera intrinsics
+python scripts\calibrate.py --images data\calib_imgs `
+  --pattern 12,9 --square 0.03
+
+# Evaluate measured distance error
+python scripts\evaluate_distance.py --gt results\ground_truth.csv
+
+# Quantize and benchmark
+python scripts\quantize.py `
+  --weights runs\detect\runs\train\bdd_finetune\weights\best.pt `
+  --calib-dir data\dataset\train\images --all
+
+# Prune
+python scripts\prune.py `
+  --weights runs\detect\runs\train\bdd_finetune\weights\best.pt `
+  --amount 0.3
+
+# Compare model accuracy
 python scripts\compare_accuracy.py --data data\dataset\data.yaml `
   --model fp32=runs\detect\runs\train\bdd_finetune\weights\best.pt `
   --model int8=models\yolov8n_int8.onnx
-```
 
-## Optional extra credit
-
-### Homography / bird's-eye view
-
-This is run on a real validation image:
-
-```powershell
+# Optional real-image BEV
 python scripts\real_demo.py `
   --source "data\dataset\val\images\TraCon_dataset_cone (10).jpg" `
   --weights runs\detect\runs\train\bdd_finetune\weights\best.pt `
   --bev --output results\real_dataset_detection_bev.jpg
-```
 
-The included output is
-`results/output_samples/real_dataset_detection_bev.jpg`.
-
-### Epipolar geometry
-
-The implementation requires two real stereo images and a measured baseline:
-
-```powershell
+# Optional epipolar geometry with a real stereo pair
 python scripts\epipolar_demo.py `
   --left data\stereo\left.jpg --right data\stereo\right.jpg `
   --baseline 0.30 --out results\epipolar_real.png
-```
 
-No stereo pair is currently in the repository, so no stereo result is
-claimed.
-
-### Optical flow
-
-The implementation is in `src/geometry/optical_flow.py` and requires real
-consecutive video frames. No video is currently in the repository, so no
-tracking result is claimed.
-
-## Tests
-
-```powershell
+# Run tests
 python -m pytest -q
 ```
-
-Current result: 25 tests passed.
