@@ -13,13 +13,6 @@ stop sign ≈ 0.6 m sign face). Unknowns that cancel: the object does not need
 to stand on any particular part of the image; only its full height must be
 visible.
 
-Method 2 -- ground-plane / homography projection (optional)
-----------------------------------------------------------
-If the camera looks at a mostly flat road, the bottom edge of a bounding box
-is an image of a ground point. Warping that point through the
-ground-plane homography (see ``src/geometry/birdseye.py``) yields the metric
-X/Y position on the ground, hence ``Z = sqrt(x^2 + y^2)``. This works even for
-flat/horizontal objects and is provided in ``birdseye.estimate_distance_bev``.
 """
 from __future__ import annotations
 

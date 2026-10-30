@@ -4,8 +4,8 @@
   * a torch/ultralytics YOLO model (training, best accuracy), and
   * an exported ONNX model (INT8/FP16 quantized, runs on CPU at edge speed).
 
-Both return the same ``Detections`` structure so the rest of the pipeline
-(distance, drawing, tracking, BEV) is backend-agnostic.
+Both return the same ``Detections`` structure so the distance and annotation
+pipeline is backend-agnostic.
 """
 from __future__ import annotations
 

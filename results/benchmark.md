@@ -15,8 +15,9 @@ yolov8n @640px, measured on this machine (i7-14700F + RTX 5070), fps after warmu
 
 takeaways, in simple words:
 
-- quantizing works: **12.2mb -> 4.9mb (2.5x smaller)**, same objects detected with
-  the same confidence (proof: `08_real_model_int8.jpg`)
+- quantizing works: **12.2mb -> 4.9mb (2.5x smaller)**. Accuracy must be
+  checked separately with `scripts/compare_accuracy.py` on the same validation
+  split; an image example is not an accuracy measurement.
 - the gpu is ~6x faster than cpu for this model
 - int8 is a bit slower than fp32 on this big desktop cpu - on small/edge boards
   int8 is usually the winner, so measure on the actual target device

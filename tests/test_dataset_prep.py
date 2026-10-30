@@ -136,6 +136,48 @@ def test_extra_membership_cutoff(tmp_path):
     assert not list((out / "labels").glob("*.txt"))
 
 
+def test_extra_split_no_leakage(tmp_path):
+    """TraCon-style trees (images/<split>/) must never pair across splits.
+
+    The val importer must see ONLY val images/labels even though train and
+    val share identical stems (a real case in TraCon)."""
+    extra = tmp_path / "tracon"
+    for split in ("train", "val"):
+        (extra / "images" / split).mkdir(parents=True)
+        (extra / "labels" / split).mkdir(parents=True)
+        _write_image(extra / "images" / split / "cone (1).jpg")
+        # same stem in both splits, DIFFERENT boxes -> a leak would show up
+        box = "0.1 0.1 0.2 0.2" if split == "train" else "0.5 0.5 0.4 0.4"
+        (extra / "labels" / split / "cone (1).txt").write_text(f"0 {box}\n")
+
+    out_train = tmp_path / "dataset" / "train"
+    out_val = tmp_path / "dataset" / "val"
+    assert extra_yolo_to_split(extra, out_train, src_split="train") == 1
+    assert extra_yolo_to_split(extra, out_val, src_split="val") == 1
+
+    train_lbl = (out_train / "labels" / "tracon_cone (1).txt").read_text().strip()
+    val_lbl = (out_val / "labels" / "tracon_cone (1).txt").read_text().strip()
+    assert train_lbl.split()[1] == "0.1"   # train coords stayed train
+    assert val_lbl.split()[1] == "0.5"     # val coords stayed val
+
+
+def test_extra_split_as_root(tmp_path):
+    """Layout with root/<split>/images+labels (DORIE-style)."""
+    extra = tmp_path / "dorie"
+    (extra / "train" / "images").mkdir(parents=True)
+    (extra / "train" / "labels").mkdir()
+    _write_image(extra / "train" / "images" / "GPAE0001.jpg")
+    (extra / "train" / "labels" / "GPAE0001.txt").write_text("8 0.5 0.5 0.3 0.1\n")
+
+    out = tmp_path / "dataset" / "train"
+    n = extra_yolo_to_split(
+        extra, out, src_split="train", remap={"8": "barrier"})
+    assert n == 1
+    lbl = (out / "labels" / "dorie_GPAE0001.txt").read_text().strip()
+    assert lbl.split()[0] == str(CLASS_NAMES.index("barrier"))
+    assert (out / "images" / "dorie_GPAE0001.jpg").exists()
+
+
 def test_build_data_yaml(tmp_path):
     root = tmp_path / "dataset"
     yaml = build_data_yaml(root, root / "data.yaml")

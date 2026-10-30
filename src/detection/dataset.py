@@ -128,6 +128,7 @@ def extra_yolo_to_split(extra_root: Path, out_split_root: Path,
         lbl_root = lbl_root / src_split
     elif src_split and (extra_root / src_split).is_dir():   # split-as-root tree
         extra_root = extra_root / src_split                 # descend into it
+        img_root, lbl_root = extra_root / "images", extra_root / "labels"
     out_img, out_lbl = _ensure_dirs(out_split_root)
     src_img = sorted(img_root.glob("*.jp*g")) + sorted(img_root.glob("*.png"))
     src_img += sorted(img_root.glob("**/*.jp*g")) + sorted(img_root.glob("**/*.png"))

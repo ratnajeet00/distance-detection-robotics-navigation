@@ -1,0 +1,11 @@
+{
+  "precision": 0.9771570045020954,
+  "recall": 0.8959537572254336,
+  "map50": 0.9475514281865324,
+  "map50_95": 0.830131156879412,
+  "per_class_map50_95": {
+    "traffic_cone": 0.830131156879412
+  },
+  "weights": "runs\\detect\\runs\\train\\bdd_finetune\\weights\\best.pt",
+  "data": "data/dataset/data.yaml"
+}

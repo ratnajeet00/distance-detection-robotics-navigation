@@ -46,11 +46,9 @@ onnx:
   int8_path: models/yolov8n_int8.onnx
   fp16_path: models/yolov8n_fp16.onnx
 
-# Bird's-eye view (optional extra). dst_m defines the metric ground patch that
-# src points map onto, so BEV distances are in meters.
 birdseye:
   enabled: false
-  src_points:            # [x, y] in the ORIGINAL image, order TL, TR, BR, BL
+  src_points:
     - [540, 470]
     - [740, 470]
     - [1180, 660]
@@ -58,13 +56,13 @@ birdseye:
   meters_per_pixel: 0.05
   bev_width: 400
   bev_height: 600
-  inset: true            # draw BEV as an inset overlay on the frame
+  inset: true
 
 optical_flow:
   enabled: false
   max_corners: 40
-  max_age: 12            # frames a track can coast without a matching detection
-  smooth_k: 5            # distance smoothing window per track
+  max_age: 12
+  smooth_k: 5
 
 runtime:
   backend: torch         # torch | onnx

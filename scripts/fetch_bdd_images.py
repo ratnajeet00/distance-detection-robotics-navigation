@@ -99,7 +99,11 @@ def main() -> None:
             stem = Path(base).stem
             cands = [base, f"{stem}.jpg", f"{stem}.jpeg", f"{stem}.png",
                      Path(base).name, f"{Path(base).stem}.jpg"]
-            entry = next((by_full.get(c) or by_base.get(c) for c in cands), None)
+            entry = None
+            for c in cands:
+                entry = by_full.get(c) or by_base.get(c)
+                if entry:
+                    break
             if entry is None:
                 missing += 1
                 continue

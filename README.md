@@ -1,275 +1,194 @@
-# distance detection (image) for robot navigation
+# Object Detection + Distance Estimation for Robotics Navigation
 
-**Ratnajeet Patil**
+Detect cones, barriers, and stop signs, estimate their distance from one
+camera, and test edge-device optimizations.
 
-one camera, one model, and this is what it does: detects cones, barriers and
-stop signs, prints the distance on every box (`Cone, 3.6m`), and runs fast
-enough for small hardware. task text: `README.cd`. everything below was
-actually executed on this machine (i7-14700F + RTX 5070).
+## What is implemented
 
----
+### Detection
 
-## contact
+- YOLOv8n transfer learning
+- BDD100K real driving images
+- Real complementary data:
+  - TraCon: cones
+  - DORIE/barrier data: barriers
+  - GTSDB data: stop signs
+- Unified classes:
 
-- **name:** Ratnajeet Patil
-- **phone:** 9422221740
-- **email:** ratnajeetpatil62@gmail.com
-
----
-
-## 1. the output (see for yourself)
-
-### detection + distance - the core task
-
-focal length FY=800, cone real height 0.5m etc. distances come straight from
-the pinhole formula (section 2), no learned distance guess:
-
-![detection with distances](results/output_samples/01_detection_distance.jpg)
-
-sanity check of the same numbers:
-
-| object     | px height | real height | Z = fy*H/h |
-|------------|----------:|------------:|-----------:|
-| cone(near) | 110 | 0.50m | **3.6m** |
-| cone(far)  | 60  | 0.50m | **6.7m** |
-| barrier    | 80  | 0.80m | **8.0m** |
-| stop sign  | 70  | 0.60m | **6.9m** |
-
-(same cone, half the pixels = double the distance - the math behaves)
-
-### the real quantized model, running on a real photo
-
-this is NOT a stub - the exported int8 onnx model this repo ships did this:
-
-![real int8 model inference](results/output_samples/08_real_model_int8.jpg)
-
-### optional extras (all three, output first)
-
-**birds eye view** - the road flattened to a top-down map with a 1m grid,
-orange dots = object foot points, green dot = robot (`--bev`):
-
-![birds eye view](results/output_samples/02_birdeye_inset.jpg)
-
-**optical flow tracking** - the cone only gets a real detection every 4th
-frame; lucas-kanade flow carries it in between and the id never changes
-(`--track`). last frame:
-
-![tracking](results/output_samples/03_tracking_final.jpg)
-
-full clip: [04_tracking_clip.mp4](results/output_samples/04_tracking_clip.mp4)
-
-**epipolar geometry** - F matrix estimated on a real stereo pair
-(0.3m baseline). the green lines are epipolar lines: the baseline is pure
-left-right translation, so they come out almost horizontal, exactly as theory
-says. 119/278 matches kept as inliers:
-
-![epipolar lines](results/output_samples/06_epipolar_lines.png)
-
----
-
-## 2. how the distance works (30 sec)
-
-from a pinhole camera, an object of real height `H` that shows up as `h`
-pixels tall is at distance:
-
-```
-Z = fy * H / h      <- meters. fy = vertical focal length in px
+```text
+0 traffic_cone
+1 barrier
+2 stop_sign
 ```
 
-thats it. cone ~0.5m, barrier ~0.8m, stop sign face ~0.6m. every number is in
-`configs/config.yaml`. no learned distance, pure geometry, as the task asked.
+Verified local data:
 
-theres also a second ground-plane method: warp the bottom of the box through
-the ground homography into the metric top-down view and read the meters off
-the plane. that is what renders the birds eye inset above.
-
-### camera intrinsics - documented (and how to calibrate for real)
-
-`configs/config.yaml` carries the pinhole intrinsics every distance comes
-from. default values are **documented placeholders**, not constants measured
-on a specific camera:
-
-| key | default | meaning |
-|-----|---------|---------|
-| `fx`, `fy` | 800 px | focal lengths for the 1280x720 result images shown here |
-| `cx`, `cy` | 640, 360 | principal point at image centre |
-| `height_m` | 1.4 | camera height above ground (used by the BEV method) |
-| `pitch_deg` | -10 | downward tilt (used by the BEV method) |
-
-because `Z = fy * H / h`, the distance error is
-**dZ/Z = dfy/fy + dh/h**, i.e. a wrong `fy` scales all distances by the same
-factor and a 1-px blur on a 100-px box is already ~1% distance error. so for
-a deployment camera, calibrate:
-
-```
-# shoot 15-30 photos of a checkerboard (cv2 pattern 12x9 inner corners etc.),
-# put them in data/calib_imgs/, then:
-python scripts/calibrate.py --images data/calib_imgs --pattern 12,9 --square 0.03
+```text
+BDD images:       2,000
+Training images:    200
+Validation images:  50
 ```
 
-`scripts/calibrate.py` reprojects all intrinsics (fx, fy, cx, cy + distortion)
-with real reprojection-error reporting - paste the numbers into the config.
+Build and train:
 
-### reference object dimensions - documented
-
-the `H` used for each class (single source of truth: `configs/config.yaml`
-`real_heights_m`; values in `src/distance/geometry.py` mirror the defaults):
-
-| class | H (m) | source / rationale |
-|-------|-------|--------------------|
-| traffic_cone | 0.50 | standard road cones are 28-36 in (~0.45-0.9 m); 0.50 m is the common dry-lease/roadway cone model |
-| barrier | 0.80 | W-beam guardrail rail height is 0.75-0.8 m above road level (roadside safety barrier), roadwork barricades are similar |
-| stop_sign | 0.60 | the sign FACE is 0.60-0.9 m (30-36 in regulation sign); 0.60 m matches the smaller regulatory faces most common in dashcam scenes |
-
-if you detect a specific cone maker's 0.9 m cones, change the value in the
-config - the geometry code consumes it directly, nothing else to update.
-
----
-
-## 3. detection (transfer learning)
-
-- pretrained backbone `yolov8n.pt` (coco), fine-tuned on our 3 classes
-- every training source below is a **real, published dataset** (no synthetic
-  images, no hand-made labels):
-
-  | class | source (real) | what it contributes |
-  |-------|---------------|---------------------|
-  | traffic_cone | [TraCon](https://github.com/ikatsamenis/Cone-Detection) | real traffic-cone images + YOLO box labels; its own train/val split avoids leakage (cloned via git) |
-  | barrier | [DORIE](https://zenodo.org/records/17277466) | real motorway dashcam photos, class 8 "Guardrail" (roadside safety barrier) remapped to our barrier |
-  | stop_sign | [GTSDB](https://huggingface.co/datasets/GlowBond/GTSDB) | real German dashcam scenes, 43 cleaned sign classes; RoI class 14 = stop sign |
-  | background | [BDD100K](https://github.com/bdd100k/bdd100k) | official label release (`bdd100k_labels.zip`); frames with **zero** `traffic sign` objects are guaranteed stop-sign-free negatives |
-
-  honest note: the current official BDD100K scalabel label release
-  (confirmed in [bdd100k#371](https://github.com/bdd100k/bdd100k/discussions/371))
-  lists every sign as a generic `traffic sign` - the v1 `type: "stop sign"`
-  attribute was dropped and the official det_20 label zip on the mirror is
-  corrupt (contains images). stop-sign positives therefore come from GTSDB,
-  which is the same real dashcam domain, and BDD100K contributes verified
-  background frames + context realism.
-
-- merged into one unified yolo space by `scripts/build_real_dataset.py`:
-
-  | id | class        |
-  |----|--------------|
-  | 0  | traffic_cone |
-  | 1  | barrier      |
-  | 2  | stop_sign    |
-
-- everything modular: `src/detection/{model,dataset,train}.py` with one thin
-  CLI per stage in `scripts/`
-- run: `python scripts/train.py --data data/dataset/data.yaml --base yolov8n.pt`
-- note: the fine-tuned `.pt` appears after one real training run on the
-  downloaded dataset - the whole pipeline is ready for it
-
----
-
-## 4. optimization for edge devices (before vs after)
-
-fps, yolov8n @640px, after warmup, on this machine:
-
-| variant          | device | size   | speed     |
-|------------------|--------|--------|-----------|
-| fp32 torch       | cpu    | 6.3mb  | 31.7 fps  |
-| fp32 torch       | gpu    | 6.3mb  | 177.6 fps |
-| fp32 onnx        | cpu    | 12.2mb | 39.6 fps  |
-| fp32 onnx        | gpu    | 12.2mb | 223.2 fps |
-| **int8 onnx**    | cpu    | **4.9mb** | 26.8 fps |
-| **int8 onnx**    | gpu    | **4.9mb** | 123.8 fps |
-| fp16 onnx        | cpu    | 6.2mb  | 22.2 fps  |
-| fp16 onnx        | gpu    | 6.2mb  | 196.5 fps |
-
-in short words:
-
-- quantization **works: 12.2mb -> 4.9mb (2.5x smaller)**, same detections,
-  same confidence - proof is `08_real_model_int8.jpg`
-- the gpu is ~6x faster than the cpu on this model
-- int8 is a bit slower than fp32 on this big desktop cpu; on small/edge boards
-  int8 usually wins, so measure on the actual target
-- pruning: 30% L1 -> **29.9% sparsity measured** (details `results/pruning.md`)
-
-getting int8 to actually work was fun (short version): the default recipe
-produced a dead model (every score 0), full-graph quantization zeroed the
-class scores, keeping class weights but dropping matmul clamped everything at
-0.5 confidence... final working recipe: **qudint8 activations + qint8 weights,
-conv-only ops, class-branch kept in fp32** - 2.5x smaller, quality identical.
-the recipe lives in `src/optimization/quantize.py` and reruns with
-`python scripts/quantize.py --weights ... --calib-dir ... --all`.
-
-full report: [results/benchmark.md](results/benchmark.md)
-
-lightweight backbones: skip between yolov8n/yolov8s in `configs/config.yaml`.
-
----
-
-## 5. setup + run
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-
-# data: bdd100k stop signs + your extra cone/barrier set -> one yolo dataset
-python scripts/prepare_bdd100k.py --bdd-labels data/bdd/train.json --bdd-images data/bdd/images --out data/dataset --split train
-python scripts/prepare_bdd100k.py --extra data/cones --out data/dataset --split train
-
-# train
-python scripts/train.py --data data/dataset/data.yaml --base yolov8n.pt --epochs 50
-
-# quantize + benchmark before/after (fp32/fp16/int8 all rebuilt by this step)
-python scripts/gen_calib.py                                    # calibration images
-python scripts/quantize.py --weights runs/train/bdd_finetune/weights/best.pt --calib-dir data/calib --all
-
-# prune
-python scripts/prune.py --weights runs/train/bdd_finetune/weights/best.pt --amount 0.3
-
-# inference: image / video / webcam / folder of images
-python scripts/run_inference.py --source data/samples/street.jpg --output out.jpg
-python scripts/run_inference.py --source 0 --track --bev
+```powershell
+python scripts\build_real_dataset.py
+python scripts\train.py --data data\dataset\data.yaml `
+  --base yolov8n.pt --epochs 50
 ```
 
-every demo picture shown above regenerates with one command:
+The trained checkpoint is:
 
-```bash
-python scripts/make_demo_output.py
+```text
+runs/detect/runs/train/bdd_finetune/weights/best.pt
 ```
 
----
+The current validation split has 173 cone instances and no barrier or
+stop-sign instances. Therefore the following values are cone-only validation
+results, not three-class results:
 
-## 6. project layout (small)
+| Precision | Recall | mAP50 | mAP50-95 |
+|---:|---:|---:|---:|
+| 0.9772 | 0.8960 | 0.9476 | 0.8301 |
 
+Reports:
+
+- `results/detection_metrics.json`
+- `results/detection_metrics.md`
+
+### Distance estimation
+
+Distance uses the pinhole-camera equation:
+
+```text
+Z = fy * H / h
 ```
-src/
-  camera.py             pinhole model + intrinsics
-  pipeline.py           the whole frame loop
-  annotation/draw.py    "Cone, 3.6m" labels
-  detection/            detector (torch+onnx), dataset prep, training
-  distance/geometry.py  the Z = fy*H/h math
-  geometry/             birds eye, epipolar, optical flow (optional extras)
-  optimization/         quantization, pruning, fps benchmark
-scripts/                one CLI per stage + make_demo_output.py
-tests/                  15 tests, no torch needed: python -m pytest tests -q
-configs/config.yaml     all geometry numbers in one place
+
+- `fy`: vertical focal length in pixels
+- `H`: known object height
+- `h`: detected bounding-box height in pixels
+
+Configured reference heights:
+
+| Class | Height |
+|---|---:|
+| traffic_cone | 0.50 m |
+| barrier | 0.80 m |
+| stop_sign | 0.60 m |
+
+The camera values are in `configs/config.yaml`. They are documented
+placeholders until a real camera is calibrated:
+
+```powershell
+python scripts\calibrate.py --images data\calib_imgs `
+  --pattern 12,9 --square 0.03
 ```
 
----
+Run detection and annotation on a real image:
 
-## 7. submission checklist
+```powershell
+python scripts\run_inference.py `
+  --source "data\dataset\val\images\TraCon_dataset_cone (10).jpg" `
+  --weights runs\detect\runs\train\bdd_finetune\weights\best.pt `
+  --output results\annotated.jpg --no-show
+```
 
-- [x] model output - `01_detection_distance.jpg`, `08_real_model_int8.jpg`
-- [x] evaluation metrics - 15/15 tests (`results/output_samples/00_test_log.txt`),
-      mAP ready via `scripts/train.py --validate-only`
-- [x] visualizations - fps tables, birds eye, epipolar lines, tracking clip (all above)
-- [x] results report - quantization + pruning before/after (section 4 + `results/benchmark.md`)
-- [x] saved model - `models/yolov8n_int8.onnx` (the fp32/fp16 versions are rebuilt
-      by the quantize step; the fine-tuned `.pt` follows the training run)
-- [x] demo output - `results/output_samples/` + this readme
-- [x] reproducible execution - commands in section 5, every claim re-runnable
+Boxes include class, confidence, and distance, for example:
 
----
+```text
+Cone, 2.3m
+Stop Sign, 3.2m
+```
 
-## 8. two honest notes
+Real distance-error evaluation requires measured tape, laser, or known-position
+data in `results/ground_truth.csv`. That file currently contains only its
+header, so no real distance-error result is claimed.
 
-1. `configs/config.yaml` intrinsics are placeholders. calibrate the actual
-   camera (checkerboard, ~15 min) before trusting absolute distances.
-2. the fine-tuned weights need the BDD100K download; everything around it
-   (data prep, training, conversion, benchmark) is already wired end to end.
+### Optimization
+
+Quantization:
+
+```powershell
+python scripts\quantize.py `
+  --weights runs\detect\runs\train\bdd_finetune\weights\best.pt `
+  --calib-dir data\dataset\train\images --all
+```
+
+Pruning:
+
+```powershell
+python scripts\prune.py `
+  --weights runs\detect\runs\train\bdd_finetune\weights\best.pt `
+  --amount 0.3
+```
+
+Benchmark:
+
+```powershell
+python scripts\quantize.py `
+  --weights runs\detect\runs\train\bdd_finetune\weights\best.pt `
+  --calib-dir data\dataset\train\images --benchmark
+```
+
+Recorded benchmark hardware: Intel i7-14700F CPU and NVIDIA RTX 5070 GPU.
+
+| Model | CPU FPS | GPU FPS | Size |
+|---|---:|---:|---:|
+| FP32 Torch | 31.7 | 177.6 | 6.3 MB |
+| FP32 ONNX | 39.6 | 223.2 | 12.2 MB |
+| INT8 ONNX | 26.8 | 123.8 | 4.9 MB |
+| FP16 ONNX | 22.2 | 196.5 | 6.2 MB |
+
+Pruning measured 29.9% sparsity with a 30% target. Full details are in
+`results/benchmark.md` and `results/pruning.md`.
+
+Compare accuracy on the same validation split:
+
+```powershell
+python scripts\compare_accuracy.py --data data\dataset\data.yaml `
+  --model fp32=runs\detect\runs\train\bdd_finetune\weights\best.pt `
+  --model int8=models\yolov8n_int8.onnx
+```
+
+## Optional extra credit
+
+### Homography / bird's-eye view
+
+This is run on a real validation image:
+
+```powershell
+python scripts\real_demo.py `
+  --source "data\dataset\val\images\TraCon_dataset_cone (10).jpg" `
+  --weights runs\detect\runs\train\bdd_finetune\weights\best.pt `
+  --bev --output results\real_dataset_detection_bev.jpg
+```
+
+The included output is
+`results/output_samples/real_dataset_detection_bev.jpg`.
+
+### Epipolar geometry
+
+The implementation requires two real stereo images and a measured baseline:
+
+```powershell
+python scripts\epipolar_demo.py `
+  --left data\stereo\left.jpg --right data\stereo\right.jpg `
+  --baseline 0.30 --out results\epipolar_real.png
+```
+
+No stereo pair is currently in the repository, so no stereo result is
+claimed.
+
+### Optical flow
+
+The implementation is in `src/geometry/optical_flow.py` and requires real
+consecutive video frames. No video is currently in the repository, so no
+tracking result is claimed.
+
+## Tests
+
+```powershell
+python -m pytest -q
+```
+
+Current result: 25 tests passed.
