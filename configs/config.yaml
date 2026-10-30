@@ -1,0 +1,71 @@
+# Project configuration. every geometry constant lives here so runs are repeatable.
+#
+# IMPORTANT: fx/fy/cx/cy below are placeholders - calibrate your real camera
+# (checkerboard + cv2.calibrateCamera, takes ~15 min) and update these. the
+# numbers are reasonable for a 1280x720 dashcam-ish camera but NOT calibrated.
+
+camera:
+  image_width: 1280
+  image_height: 720
+  fx: 800           # focal length in pixels (horizontal)
+  fy: 800           # focal length in pixels (vertical)
+  cx: 640           # principal point x
+  cy: 360           # principal point y
+  height_m: 1.4     # camera height above ground (for ground-plane methods)
+  pitch_deg: -10.0  # camera pitch (deg, negative = looking down)
+
+# Classes the detector is fine-tuned on. order = class ids used in training.
+classes:
+  - traffic_cone
+  - barrier
+  - stop_sign
+
+# real-world heights (meters) - the physical constants the distance model uses.
+# tweak if your cones/barriers are taller/shorter than these.
+real_heights_m:
+  traffic_cone: 0.50
+  barrier: 0.80
+  stop_sign: 0.60
+
+# Printer-friendly display names used in annotations, e.g. "Cone, 1.5m"
+display_names:
+  traffic_cone: Cone
+  barrier: Barrier
+  stop_sign: Stop Sign
+
+detection:
+  base_weights: yolov8n.pt     # pretrained backbone for transfer learning
+  weights: runs/train/bdd_finetune/weights/best.pt
+  conf: 0.25
+  iou: 0.45
+  imgsz: 640
+  device: auto                  # auto | cpu | 0 | 0,1 ...
+
+onnx:
+  fp32_path: models/yolov8n.onnx
+  int8_path: models/yolov8n_int8.onnx
+  fp16_path: models/yolov8n_fp16.onnx
+
+# Bird's-eye view (optional extra). dst_m defines the metric ground patch that
+# src points map onto, so BEV distances are in meters.
+birdseye:
+  enabled: false
+  src_points:            # [x, y] in the ORIGINAL image, order TL, TR, BR, BL
+    - [540, 470]
+    - [740, 470]
+    - [1180, 660]
+    - [100, 660]
+  meters_per_pixel: 0.05
+  bev_width: 400
+  bev_height: 600
+  inset: true            # draw BEV as an inset overlay on the frame
+
+optical_flow:
+  enabled: false
+  max_corners: 40
+  max_age: 12            # frames a track can coast without a matching detection
+  smooth_k: 5            # distance smoothing window per track
+
+runtime:
+  backend: torch         # torch | onnx
+  onnx_model: models/yolov8n_int8.onnx

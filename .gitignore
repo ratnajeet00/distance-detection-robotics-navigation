@@ -1,0 +1,23 @@
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# training artifacts (big / regenerable)
+runs/
+*.pt
+!yolov8n.pt
+models/*.onnx
+!models/yolov8n_int8.onnx
+data/bdd/
+data/dataset/
+data/calib/
+
+# personal notes (not part of the submission)
+DEV_NOTES.md
+
+# editor noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,21 @@
+# Core
+numpy>=1.24
+opencv-python>=4.8
+PyYAML>=6.0
+tqdm>=4.65
+
+# Detection / training (transfer learning with YOLOv8 family backbones)
+ultralytics>=8.2.0
+torch>=2.0
+torchvision>=0.15
+
+# Edge-device optimization (quantization + inference runtime)
+onnx>=1.14
+onnxruntime>=1.16
+# optional GPU inference for onnxruntime (install separately if needed):
+#   pip install onnxruntime-gpu
+# optional FP16 conversion helper:
+onnxconverter-common>=1.13
+
+# Testing
+pytest>=7.0
