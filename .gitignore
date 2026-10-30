@@ -12,6 +12,9 @@ models/*.onnx
 data/bdd/
 data/dataset/
 data/calib/
+data/extra_raw/
+data/dorie_barrier/
+data/gtsdb_stop/
 
 # personal notes (not part of the submission)
 DEV_NOTES.md

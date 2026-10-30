@@ -105,27 +105,45 @@ def bdd_to_yolo(labels_json: Path, images_dir: Path, out_split_root: Path,
 
 
 def extra_yolo_to_split(extra_root: Path, out_split_root: Path,
-                        remap: Dict[str, str] | None = None) -> int:
-    """Import an extra dataset laid out as::
+                        remap: Dict[str, str] | None = None,
+                        src_split: str | None = None) -> int:
+    """Import an extra dataset laid out as one of::
 
         extra_root/
-            images/*.jpg          # either flat, or nested any level
-            labels/*.txt          # YOLO txt, class ids may need remapping
+            images/<src_split>/*.jpg  + labels/<src_split>/*.txt  (src_split set)
+            images/<x>/*.jpg          + labels/<x>/*.txt          (split-as-root)
+            images/*.jpg              + labels/*.txt              (flat)
 
-    If ``remap`` is given as {old_id: our_name}, ids are remapped. If extra
-    txt class ids already match ours it stays a no-op copy.
+    Labels are paired with images under the exact same relative path only,
+    so they never leak across split subfolders. ``src_split`` selects the
+    subfolder for TraCon-style trees. If ``remap`` is given as {old_id:
+    our_name}, ids are remapped; ids already matching our space pass through.
     """
     remap = remap or {}
+    img_root = extra_root / "images"
+    lbl_root = extra_root / "labels"
+    root_name = extra_root.name  # for output prefixes, even after descending
+    if src_split and (img_root / src_split).is_dir():       # TraCon-like tree
+        img_root = img_root / src_split
+        lbl_root = lbl_root / src_split
+    elif src_split and (extra_root / src_split).is_dir():   # split-as-root tree
+        extra_root = extra_root / src_split                 # descend into it
     out_img, out_lbl = _ensure_dirs(out_split_root)
-    src_img = sorted(extra_root.glob("images/**/*.jp*g")) + sorted(extra_root.glob("images/**/*.png"))
-    src_lbl = sorted(extra_root.glob("labels/**/*.txt"))
-    lbl_of = {Path(p).stem: p for p in src_lbl}
+    src_img = sorted(img_root.glob("*.jp*g")) + sorted(img_root.glob("*.png"))
+    src_img += sorted(img_root.glob("**/*.jp*g")) + sorted(img_root.glob("**/*.png"))
+    src_img = sorted({p for p in src_img})
+    lbl_of = {Path(p).stem: p for p in lbl_root.glob("**/*.txt")} if lbl_root.is_dir() else {}
+    flat_ok = all(p.parent == img_root for p in src_img)
     copied = 0
     for img in src_img:
-        lbl = lbl_of.get(img.stem)
+        rel = img.relative_to(img_root)
+        # no cross-split leaks: pair via the same relative path first
+        lbl = lbl_root / rel.with_suffix(".txt")
+        if not lbl.exists() and flat_ok:
+            lbl = lbl_of.get(img.stem)  # flat fallback: exact stem anywhere
         if lbl is None:
             continue
-        dst_name = f"{extra_root.name}_{img.stem}{img.suffix}"
+        stem = f"{root_name}_{img.stem}"
         out = []
         for line in lbl.read_text().strip().splitlines():
             parts = line.split()
@@ -138,8 +156,8 @@ def extra_yolo_to_split(extra_root: Path, out_split_root: Path,
             parts[0] = str(CLASS_TO_ID[new_name])
             out.append(" ".join(parts))
         if out:
-            out_lbl.joinpath(dst_name + ".txt").write_text("\n".join(out))
-            shutil.copy(img, out_img / dst_name)
+            out_lbl.joinpath(stem + ".txt").write_text("\n".join(out))
+            shutil.copy(img, out_img / f"{stem}{img.suffix}")
             copied += 1
     return copied
 
@@ -147,6 +165,7 @@ def extra_yolo_to_split(extra_root: Path, out_split_root: Path,
 def build_data_yaml(dataset_root: Path, out_yaml: Path) -> Path:
     """Write the YOLO data.yaml for the merged dataset."""
     root = Path(dataset_root).resolve()
+    out_yaml.parent.mkdir(parents=True, exist_ok=True)
     text = (
         f"path: {root.as_posix()}\n"
         "train: train/images\n"
@@ -158,13 +177,15 @@ def build_data_yaml(dataset_root: Path, out_yaml: Path) -> Path:
 
 
 def print_class_stats(dataset_root: Path) -> None:
-    print(f"{'class':<15}{'train':>8}{'val':>8}")
+    root = Path(dataset_root)
+    stats = {n: {s: 0 for s in ("train", "val")} for n in CLASS_NAMES}
     for split in ("train", "val"):
-        counts = {n: 0 for n in CLASS_NAMES}
-        root = Path(dataset_root) / split / LABELS_DIR
-        for txt in root.glob("*.txt"):
-            for line in txt.read_text().strip().splitlines():
+        for txt in (root / split / LABELS_DIR).glob("*.txt"):
+            for line in txt.read_text().splitlines():
+                if not line.strip():
+                    continue
                 cls = int(line.split()[0])
-                counts[CLASS_NAMES[max(0, min(cls, len(CLASS_NAMES) - 1))]] += 1
-        for n, c in counts.items():
-            print(f"{n:<15}{c:>8}" + ("" if split == "train" else ""))
+                stats[CLASS_NAMES[max(0, min(cls, len(CLASS_NAMES) - 1))]][split] += 1
+    print(f"{'class':<15}{'train':>8}{'val':>8}")
+    for n in CLASS_NAMES:
+        print(f"{n:<15}{stats[n]['train']:>8}{stats[n]['val']:>8}")

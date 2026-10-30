@@ -22,20 +22,30 @@ def draw_detections(
     boxes: np.ndarray,
     class_names: Sequence[str],
     distances: Sequence[Optional[float]],
+    scores: Optional[Sequence[Optional[float]]] = None,
     display_names: Optional[Dict[str, str]] = None,
     thickness: int = 2,
 ) -> np.ndarray:
-    """Draw each box with "<Display Name>, <d>m" label (two decimals).
+    """Draw each box with a "<Display Name> (<conf>), <d>m" label.
 
     `class_names` are the raw dataset names (used for the color table);
     `display_names` maps them to the label text, e.g. traffic_cone -> Cone.
+    `distances`/`scores` may contain None entries (label parts are omitted).
     """
     out = frame
-    for i, (box, name, dist) in enumerate(zip(boxes, class_names, distances)):
+    if scores is None:
+        scores = [None] * len(boxes)
+    for i, (box, name, dist, score) in enumerate(
+            zip(boxes, class_names, distances, scores)):
         x1, y1, x2, y2 = (int(round(v)) for v in box)
         color = CLASS_COLORS.get(name, (200, 200, 200))
         pretty = (display_names or {}).get(name, name)
-        label = f"{pretty}, {dist:.1f}m" if dist is not None else pretty
+        parts = [pretty]
+        if score is not None:
+            parts.append(f"({score * 100:.0f}%)")
+        if dist is not None:
+            parts.append(f"{dist:.1f}m")
+        label = ", ".join(parts)
         cv2.rectangle(out, (x1, y1), (x2, y2), color, thickness)
         _fill_label(out, label, (x1, max(0, y1 - 22)), color)
     return out

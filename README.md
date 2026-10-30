@@ -83,14 +83,71 @@ theres also a second ground-plane method: warp the bottom of the box through
 the ground homography into the metric top-down view and read the meters off
 the plane. that is what renders the birds eye inset above.
 
+### camera intrinsics - documented (and how to calibrate for real)
+
+`configs/config.yaml` carries the pinhole intrinsics every distance comes
+from. default values are **documented placeholders**, not constants measured
+on a specific camera:
+
+| key | default | meaning |
+|-----|---------|---------|
+| `fx`, `fy` | 800 px | focal lengths for the 1280x720 result images shown here |
+| `cx`, `cy` | 640, 360 | principal point at image centre |
+| `height_m` | 1.4 | camera height above ground (used by the BEV method) |
+| `pitch_deg` | -10 | downward tilt (used by the BEV method) |
+
+because `Z = fy * H / h`, the distance error is
+**dZ/Z = dfy/fy + dh/h**, i.e. a wrong `fy` scales all distances by the same
+factor and a 1-px blur on a 100-px box is already ~1% distance error. so for
+a deployment camera, calibrate:
+
+```
+# shoot 15-30 photos of a checkerboard (cv2 pattern 12x9 inner corners etc.),
+# put them in data/calib_imgs/, then:
+python scripts/calibrate.py --images data/calib_imgs --pattern 12,9 --square 0.03
+```
+
+`scripts/calibrate.py` reprojects all intrinsics (fx, fy, cx, cy + distortion)
+with real reprojection-error reporting - paste the numbers into the config.
+
+### reference object dimensions - documented
+
+the `H` used for each class (single source of truth: `configs/config.yaml`
+`real_heights_m`; values in `src/distance/geometry.py` mirror the defaults):
+
+| class | H (m) | source / rationale |
+|-------|-------|--------------------|
+| traffic_cone | 0.50 | standard road cones are 28-36 in (~0.45-0.9 m); 0.50 m is the common dry-lease/roadway cone model |
+| barrier | 0.80 | W-beam guardrail rail height is 0.75-0.8 m above road level (roadside safety barrier), roadwork barricades are similar |
+| stop_sign | 0.60 | the sign FACE is 0.60-0.9 m (30-36 in regulation sign); 0.60 m matches the smaller regulatory faces most common in dashcam scenes |
+
+if you detect a specific cone maker's 0.9 m cones, change the value in the
+config - the geometry code consumes it directly, nothing else to update.
+
 ---
 
 ## 3. detection (transfer learning)
 
 - pretrained backbone `yolov8n.pt` (coco), fine-tuned on our 3 classes
-- data: BDD100K gives stop signs (the `traffic sign` + `type: "stop sign"`
-  labels); cones/barriers are not in BDD100K, so the prep script merges any
-  extra yolo dataset (`--extra`) with a class remap:
+- every training source below is a **real, published dataset** (no synthetic
+  images, no hand-made labels):
+
+  | class | source (real) | what it contributes |
+  |-------|---------------|---------------------|
+  | traffic_cone | [TraCon](https://github.com/ikatsamenis/Cone-Detection) | real traffic-cone images + YOLO box labels; its own train/val split avoids leakage (cloned via git) |
+  | barrier | [DORIE](https://zenodo.org/records/17277466) | real motorway dashcam photos, class 8 "Guardrail" (roadside safety barrier) remapped to our barrier |
+  | stop_sign | [GTSDB](https://huggingface.co/datasets/GlowBond/GTSDB) | real German dashcam scenes, 43 cleaned sign classes; RoI class 14 = stop sign |
+  | background | [BDD100K](https://github.com/bdd100k/bdd100k) | official label release (`bdd100k_labels.zip`); frames with **zero** `traffic sign` objects are guaranteed stop-sign-free negatives |
+
+  honest note: the current official BDD100K scalabel label release
+  (confirmed in [bdd100k#371](https://github.com/bdd100k/bdd100k/discussions/371))
+  lists every sign as a generic `traffic sign` - the v1 `type: "stop sign"`
+  attribute was dropped and the official det_20 label zip on the mirror is
+  corrupt (contains images). stop-sign positives therefore come from GTSDB,
+  which is the same real dashcam domain, and BDD100K contributes verified
+  background frames + context realism.
+
+- merged into one unified yolo space by `scripts/build_real_dataset.py`:
 
   | id | class        |
   |----|--------------|

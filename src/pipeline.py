@@ -103,7 +103,8 @@ class DistancePipeline:
             tracks = self._tracker.update(frame, dets.boxes, names, distances)
 
         out = draw_detections(frame, dets.boxes, dets.names, distances,
-                              self.display_names)
+                              scores=dets.scores,
+                              display_names=self.display_names)
         if tracks is not None:
             # use smoothed distance when available (stable over time)
             draw_track_ids(out, [(t.box, t.track_id, t.name) for t in tracks])

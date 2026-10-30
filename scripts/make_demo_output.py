@@ -108,7 +108,7 @@ def save_basic(out_dir: Path):
     boxes = np.array([d[1] for d in det], np.float32)
     names = [d[0] for d in det]
     dists = [estimate_distance(n, b, CAM) for n, b in det]
-    out = draw_detections(frame, boxes, names, dists, DISPLAY)
+    out = draw_detections(frame, boxes, names, dists, display_names=DISPLAY)
     draw_legend(out, ["distances from Z = fy*H/h (fy=800)"])
     # sanity: computed distances for our drawn sizes
     truth = [0.5 * 800 / (b[3] - b[1]) for _, b in det[:2]]
@@ -273,7 +273,8 @@ def save_real_model(out_dir: Path):
     for n, b, s, d in zip(dets.names, dets.boxes, dets.scores, distances):
         ds = format(d, ".1f") + "m" if d else "n/a (class not in height table)"
         print(f"  {n:12s} score {s:.2f}  box {b.astype(int).tolist()}  dist {ds}")
-    draw_legend(draw_detections(frame, dets.boxes, dets.names, distances),
+    draw_legend(draw_detections(frame, dets.boxes, dets.names, distances,
+                                scores=dets.scores),
                 ["real inference: yolov8n INT8 onnx (CPU)",
                  "distance only for the 3 robot classes"])
     cv2.imwrite(str(out_dir / "08_real_model_int8.jpg"), frame)
